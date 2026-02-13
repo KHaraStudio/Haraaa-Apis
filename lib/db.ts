@@ -1,14 +1,9 @@
-import { Pool } from "pg";
+import { neon } from "@neondatabase/serverless";
 
-const globalForPg = global as unknown as { pool: Pool };
+const databaseUrl = process.env.DATABASE_URL!;
 
-export const pool =
-  globalForPg.pool ||
-  new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-      rejectUnauthorized: false,
-    },
-  });
+// buat koneksi
+const sql = neon(databaseUrl);
 
-if (process.env.NODE_ENV !== "production") globalForPg.pool = pool;
+export default sql;
+export { sql };
