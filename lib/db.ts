@@ -1,36 +1,23 @@
 import { neon } from "@neondatabase/serverless";
 
-const databaseUrl = process.env.DATABASE_URL!;
-const sql = neon(databaseUrl);
+const sql = neon(process.env.DATABASE_URL!);
 
 /**
- * Adapter agar kompatibel dengan kode lama:
- * pool.query("SELECT * FROM users WHERE id=$1", [id])
+ * Adapter agar kompatibel dengan "pg" style
+ * Jadi semua code lama tetap jalan (rowCount, rows, dll)
  */
 export const pool = {
-  async query(text: string, params?: any[]) {
+  async query(query: string, params: any[] = []) {
     try {
-      // ubah $1 $2 $3 → ${}
-      if (!params || params.length === 0) {
-        const result = await sql(text as any);
-        return { rows: result };
-      }
+      const rows = await sql(query, params);
 
-      // konversi parameter postgres style
-      let index = 0;
-      const parsed = text.replace(/\$(\d+)/g, () => {
-        const value = params[index++];
-        return `'${value}'`;
-      });
-
-      const result = await sql(parsed as any);
-      return { rows: result };
+      return {
+        rows,
+        rowCount: rows.length, // ← ini yang bikin middleware kamu hidup lagi
+      };
     } catch (err) {
-      console.error("DB ERROR:", err);
+      console.error("DB Query Error:", err);
       throw err;
     }
-  }
+  },
 };
-
-export default sql;
-export { sql };
