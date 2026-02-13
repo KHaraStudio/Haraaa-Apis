@@ -1,108 +1,52 @@
-/**
- * POST /api/auth/register
- * Daftarkan pengguna baru dan buat API key otomatis (Neon version).
- */
-
 import { NextRequest, NextResponse } from "next/server";
-import { sql, initDB } from "@/lib/db";
+import { pool } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
-import {
-  generateApiKey,
-  ok,
-  fail,
-  isEmail,
-  isUsername,
-  isPassOk as isPasswordOk,
-} from "@/lib/apiUtils";
+import { generateApiKey, ok, fail, isEmail, isUsername, isPassOk as isPasswordOk } from "@/lib/apiUtils";
+import { runMigration } from "@/lib/migrate";
 
 export async function POST(req: NextRequest) {
   try {
-    // pastikan tabel ada
-    await initDB();
+    await runMigration();
 
     const body = await req.json().catch(() => ({}));
     const { username, email, password } = body as Record<string, string>;
 
-    // ── Validasi ──────────────────────────────────────────
     if (!username || !email || !password) {
-      return NextResponse.json(
-        fail("Username, email, dan password wajib diisi."),
-        { status: 400 }
-      );
+      return NextResponse.json(fail("Username, email, dan password wajib diisi."), { status: 400 });
     }
 
-    if (!isUsername(username)) {
-      return NextResponse.json(
-        fail("Username hanya boleh huruf, angka, underscore (3–20 karakter)."),
-        { status: 400 }
-      );
-    }
+    if (!isUsername(username))
+      return NextResponse.json(fail("Username tidak valid"), { status: 400 });
 
-    if (!isEmail(email)) {
-      return NextResponse.json(fail("Format email tidak valid."), {
-        status: 400,
-      });
-    }
+    if (!isEmail(email))
+      return NextResponse.json(fail("Email tidak valid"), { status: 400 });
 
-    if (!isPasswordOk(password)) {
-      return NextResponse.json(fail("Password minimal 6 karakter."), {
-        status: 400,
-      });
-    }
+    if (!isPasswordOk(password))
+      return NextResponse.json(fail("Password minimal 6 karakter"), { status: 400 });
 
-    // ── Cek duplikasi ─────────────────────────────────────
-    const existing = await sql`
-      SELECT id, email, username
-      FROM users
-      WHERE email = ${email.toLowerCase()}
-         OR username = ${username.toLowerCase()}
-      LIMIT 1
-    `;
+    // cek user
+    const check = await pool.query(
+      `SELECT * FROM users WHERE email=$1 OR username=$2`,
+      [email.toLowerCase(), username.toLowerCase()]
+    );
 
-    if (existing.length > 0) {
-      const user = existing[0];
-      const field =
-        user.email === email.toLowerCase() ? "Email" : "Username";
+    if (check.rows.length > 0)
+      return NextResponse.json(fail("Email atau username sudah digunakan"), { status: 409 });
 
-      return NextResponse.json(fail(`${field} sudah terdaftar.`), {
-        status: 409,
-      });
-    }
-
-    // ── Buat user ─────────────────────────────────────────
     const hashed = await hashPassword(password);
     const apiKey = generateApiKey();
 
-    const created = await sql`
-      INSERT INTO users (username, email, password, api_key)
-      VALUES (
-        ${username.toLowerCase()},
-        ${email.toLowerCase()},
-        ${hashed},
-        ${apiKey}
-      )
-      RETURNING id, username, email, api_key, created_at
-    `;
-
-    const user = created[0];
-
-    return NextResponse.json(
-      ok(
-        {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          apiKey: user.api_key,
-          createdAt: user.created_at,
-        },
-        "Registrasi berhasil! Selamat datang di Hara API."
-      ),
-      { status: 201 }
+    const result = await pool.query(
+      `INSERT INTO users (username,email,password,api_key)
+       VALUES ($1,$2,$3,$4)
+       RETURNING id,username,email,api_key,created_at`,
+      [username.toLowerCase(), email.toLowerCase(), hashed, apiKey]
     );
+
+    return NextResponse.json(ok(result.rows[0], "Registrasi berhasil!"), { status: 201 });
+
   } catch (e) {
-    console.error("register error:", e);
-    return NextResponse.json(fail("Terjadi kesalahan server.", 500), {
-      status: 500,
-    });
+    console.error(e);
+    return NextResponse.json(fail("Server error"), { status: 500 });
   }
-}	
+}
