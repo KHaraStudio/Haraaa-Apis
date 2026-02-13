@@ -2,47 +2,60 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 
 /**
- * Middleware untuk validasi API Key
- * Header: x-api-key
- */
 
-export async function withApiAuth(req: NextRequest) {
+* Context yang diberikan ke route setelah auth sukses
+  */
+  export type ApiCtx = {
+  userId: string;
+  username: string;
+  apiKey: string;
+  };
+
+/**
+
+* Wrapper proteksi API Route (BUKAN NextJS middleware.ts)
+  */
+  export async function withApiAuth(
+  req: NextRequest,
+  handler: (req: NextRequest, ctx: ApiCtx) => Promise<NextResponse>
+  ) {
   try {
-    const apiKey = req.headers.get("x-api-key");
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, message: "API key dibutuhkan" },
-        { status: 401 }
-      );
-    }
-
-    const result = await pool.query(
-      `SELECT id, username FROM users WHERE api_key=$1`,
-      [apiKey]
-    );
-
-    if (result.rows.length === 0) {
-      return NextResponse.json(
-        { success: false, message: "API key tidak valid" },
-        { status: 401 }
-      );
-    }
-
-    // inject user ke request
-    const requestHeaders = new Headers(req.headers);
-    requestHeaders.set("x-user-id", result.rows[0].id.toString());
-    requestHeaders.set("x-username", result.rows[0].username);
-
-    return NextResponse.next({
-      request: { headers: requestHeaders }
-    });
-
-  } catch (err) {
-    console.error("Auth middleware error:", err);
-    return NextResponse.json(
-      { success: false, message: "Server error" },
-      { status: 500 }
-    );
+  const apiKey = req.headers.get("x-api-key");
+  
+  if (!apiKey) {
+  return NextResponse.json(
+  { success: false, message: "API key diperlukan." },
+  { status: 401 }
+  );
   }
+  
+  // cek database Neon
+  const result = await pool.query(
+  "SELECT id, username, api_key FROM users WHERE api_key=$1 LIMIT 1",
+  [apiKey]
+  );
+  
+  if (result.rowCount === 0) {
+  return NextResponse.json(
+  { success: false, message: "API key tidak valid." },
+  { status: 403 }
+  );
+  }
+  
+  const user = result.rows[0];
+  
+  // jalankan handler route
+  return handler(req, {
+  userId: String(user.id),
+  username: user.username,
+  apiKey: user.api_key,
+  });
+
+} catch (err) {
+console.error("withApiAuth error:", err);
+return NextResponse.json(
+{ success: false, message: "Terjadi kesalahan server." },
+{ status: 500 }
+);
+}
 }
