@@ -1,11 +1,6 @@
-/**
- * POST /api/auth/login
- * Login pengguna; set cookie HttpOnly berisi JWT.
- */
-
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { comparePassword, signToken } from "@/lib/auth";
+import { pool } from "@/lib/db";
+import { comparePassword } from "@/lib/auth";
 import { ok, fail } from "@/lib/apiUtils";
 
 export async function POST(req: NextRequest) {
@@ -13,41 +8,33 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { email, password } = body as Record<string, string>;
 
-    if (!email || !password) {
-      return NextResponse.json(fail("Email dan password wajib diisi."), { status: 400 });
-    }
+    if (!email || !password)
+      return NextResponse.json(fail("Email dan password wajib diisi"), { status: 400 });
 
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (!user) {
-      return NextResponse.json(fail("Email atau password salah."), { status: 401 });
-    }
-
-    const match = await comparePassword(password, user.password);
-    if (!match) {
-      return NextResponse.json(fail("Email atau password salah."), { status: 401 });
-    }
-
-    // Buat JWT dan simpan ke cookie HttpOnly
-    const token = signToken({ userId: user.id, email: user.email, username: user.username });
-
-    const res = NextResponse.json(
-      ok(
-        { token, user: { id: user.id, username: user.username, email: user.email, apiKey: user.apiKey } },
-        "Login berhasil."
-      )
+    const user = await pool.query(
+      `SELECT * FROM users WHERE email=$1`,
+      [email.toLowerCase()]
     );
 
-    res.cookies.set("auth_token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60, // 7 hari
-      path: "/",
-    });
+    if (user.rows.length === 0)
+      return NextResponse.json(fail("User tidak ditemukan"), { status: 404 });
 
-    return res;
+    const valid = await comparePassword(password, user.rows[0].password);
+
+    if (!valid)
+      return NextResponse.json(fail("Password salah"), { status: 401 });
+
+    return NextResponse.json(
+      ok({
+        id: user.rows[0].id,
+        username: user.rows[0].username,
+        email: user.rows[0].email,
+        apiKey: user.rows[0].api_key
+      }, "Login berhasil")
+    );
+
   } catch (e) {
-    console.error("login error:", e);
-    return NextResponse.json(fail("Terjadi kesalahan server.", 500), { status: 500 });
+    console.error(e);
+    return NextResponse.json(fail("Server error"), { status: 500 });
   }
 }

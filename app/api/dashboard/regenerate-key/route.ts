@@ -1,27 +1,23 @@
-/**
- * POST /api/dashboard/regenerate-key
- * Generate ulang API key untuk user yang sedang login.
- */
+import { NextRequest, NextResponse } from "next/server";
+import { pool } from "@/lib/db";
+import { generateApiKey, ok, fail } from "@/lib/apiUtils";
 
-import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { ok } from "@/lib/apiUtils";
-import { generateApiKey } from "@/lib/apiUtils";
-import { getAuthPayload, unauthorizedJson } from "@/middleware/withAuth";
+export async function POST(req: NextRequest) {
+  try {
+    const apiKey = req.headers.get("x-api-key");
+    if (!apiKey)
+      return NextResponse.json(fail("Unauthorized"), { status: 401 });
 
-export async function POST() {
-  const payload = getAuthPayload();
-  if (!payload) return unauthorizedJson();
+    const newKey = generateApiKey();
 
-  const newKey = generateApiKey();
+    await pool.query(
+      `UPDATE users SET api_key=$1 WHERE api_key=$2`,
+      [newKey, apiKey]
+    );
 
-  const updated = await prisma.user.update({
-    where: { id: payload.userId },
-    data: { apiKey: newKey },
-    select: { apiKey: true },
-  });
+    return NextResponse.json(ok({ apiKey: newKey }, "API key diperbarui"));
 
-  return NextResponse.json(
-    ok({ apiKey: updated.apiKey }, "API key berhasil diperbarui. Key lama tidak berlaku lagi.")
-  );
+  } catch {
+    return NextResponse.json(fail("Server error"), { status: 500 });
+  }
 }

@@ -1,28 +1,25 @@
-/**
- * GET /api/auth/me
- * Kembalikan data user yang sedang login (dari cookie).
- */
-
-import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
+import { pool } from "@/lib/db";
 import { ok, fail } from "@/lib/apiUtils";
-import { getAuthPayload, unauthorizedJson } from "@/middleware/withAuth";
 
-export async function GET() {
-  const payload = getAuthPayload();
-  if (!payload) return unauthorizedJson();
+export async function GET(req: NextRequest) {
+  try {
+    const apiKey = req.headers.get("x-api-key");
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    select: {
-      id: true, username: true, email: true, apiKey: true, createdAt: true,
-      _count: { select: { logs: true } },
-    },
-  });
+    if (!apiKey)
+      return NextResponse.json(fail("API key tidak ditemukan"), { status: 401 });
 
-  if (!user) return NextResponse.json(fail("User tidak ditemukan.", 404), { status: 404 });
+    const user = await pool.query(
+      `SELECT id,username,email,created_at FROM users WHERE api_key=$1`,
+      [apiKey]
+    );
 
-  return NextResponse.json(
-    ok({ ...user, totalRequests: user._count.logs })
-  );
+    if (user.rows.length === 0)
+      return NextResponse.json(fail("API key invalid"), { status: 401 });
+
+    return NextResponse.json(ok(user.rows[0]));
+
+  } catch (e) {
+    return NextResponse.json(fail("Server error"), { status: 500 });
+  }
 }
