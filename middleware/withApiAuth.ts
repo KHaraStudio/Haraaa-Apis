@@ -35,7 +35,7 @@ import { pool } from "@/lib/db";
   [apiKey]
   );
   
-  if (result.rowCount === 0) {
+  if (result.rowCount.length === 0) {
   return NextResponse.json(
   { success: false, message: "API key tidak valid." },
   { status: 403 }
